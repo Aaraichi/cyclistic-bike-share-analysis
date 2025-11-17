@@ -1,0 +1,189 @@
+---
+title: "Cyclistic Case Study Report"
+author: "Ayoub"
+date: "2025-11-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+library(tidyverse)
+library(lubridate)
+library(janitor)
+```
+
+# ASK  
+**Business Task**  
+Analyze how annual members and casual riders use Cyclistic bikes differently to help design a marketing strategy that converts casual riders into annual members.
+
+# PREPARE  
+**Data Source**  
+- Divvy 2019 Q1  
+- Divvy 2020 Q1  
+- Public dataset made available by Motivate International Inc.  
+- No PII included  
+
+# PROCESS  
+
+```{r load-and-wrangle}
+# Load raw data
+q1_2019 <- read_csv("Data_raw/Divvy_Trips_2019_Q1.csv")
+q1_2020 <- read_csv("Data_raw/Divvy_Trips_2020_Q1.csv")
+
+# Clean column names
+q1_2019 <- clean_names(q1_2019)
+q1_2020 <- clean_names(q1_2020)
+
+# Standardize 2019 schema:
+# - trip_id as character
+# - create member_casual from usertype (Subscriber = member, Customer = casual)
+# - parse started_at / ended_at from start_time / end_time
+q1_2019 <- q1_2019 %>%
+  mutate(
+    trip_id       = as.character(trip_id),
+    member_casual = if_else(usertype == "Subscriber", "member", "casual"),
+    started_at    = ymd_hms(start_time),
+    ended_at      = ymd_hms(end_time)
+  )
+
+# Standardize 2020 schema:
+# - trip_id from ride_id
+# - make sure started_at / ended_at are parsed
+q1_2020 <- q1_2020 %>%
+  mutate(
+    trip_id    = as.character(ride_id),
+    started_at = ymd_hms(started_at),
+    ended_at   = ymd_hms(ended_at)
+  )
+
+# Keep only common / needed columns and stack them
+all_trips <- bind_rows(
+  q1_2019 %>% select(trip_id, started_at, ended_at, member_casual),
+  q1_2020 %>% select(trip_id, started_at, ended_at, member_casual)
+)
+
+# Create time-based variables & ride length
+all_trips <- all_trips %>% 
+  mutate(
+    ride_length = as.numeric(difftime(ended_at, started_at, units = "mins")),
+    day_of_week = wday(started_at, label = TRUE),
+    month       = month(started_at, label = TRUE),
+    hour        = hour(started_at)
+  )
+
+# Remove invalid rides
+all_trips_clean <- all_trips %>%
+  filter(
+    !is.na(ride_length),
+    ride_length > 0,
+    ride_length < 1440
+  )
+
+glimpse(all_trips_clean)
+```
+
+# ANALYZE  
+
+## Ride length by rider type  
+
+```{r ride-length-summary}
+all_trips_clean %>%
+  group_by(member_casual) %>%
+  summarise(
+    mean_ride_length   = mean(ride_length),
+    median_ride_length = median(ride_length),
+    max_ride_length    = max(ride_length)
+  )
+```
+
+## Rides by day of week  
+
+```{r rides-by-day}
+all_trips_clean %>%
+  group_by(member_casual, day_of_week) %>%
+  summarise(num_rides = n(), .groups = "drop")
+```
+
+## Rides by hour of day  
+
+```{r rides-by-hour}
+all_trips_clean %>%
+  group_by(member_casual, hour) %>%
+  summarise(num_rides = n(), .groups = "drop")
+```
+
+# VISUALIZATIONS  
+
+## Average Ride Length: Members vs Casual Riders  
+
+```{r plot-avg-ride-length, fig.width=6, fig.height=4}
+all_trips_clean %>%
+  group_by(member_casual) %>%
+  summarise(mean_ride_length = mean(ride_length)) %>%
+  ggplot(aes(x = member_casual, y = mean_ride_length)) +
+  geom_col() +
+  labs(
+    x = "Rider Type",
+    y = "Average ride length (minutes)",
+    title = "Average Ride Length by Rider Type"
+  )
+```
+
+## Number of Rides by Day of Week  
+
+```{r plot-rides-by-day, fig.width=7, fig.height=4}
+all_trips_clean %>%
+  count(member_casual, day_of_week) %>%
+  ggplot(aes(x = day_of_week, y = n, fill = member_casual)) +
+  geom_col(position = "dodge") +
+  labs(
+    x = "Day of Week",
+    y = "Number of rides",
+    title = "Rides by Day of Week"
+  )
+```
+
+## Number of Rides by Hour of Day  
+
+```{r plot-rides-by-hour, fig.width=7, fig.height=4}
+all_trips_clean %>%
+  count(member_casual, hour) %>%
+  ggplot(aes(x = hour, y = n, color = member_casual)) +
+  geom_line() +
+  labs(
+    x = "Hour of day",
+    y = "Number of rides",
+    title = "Rides by Hour of Day"
+  )
+```
+
+# SHARE: Key Findings  
+
+- Casual riders take **about 3× longer** rides than members.  
+- Casual use is highest on **weekends** and in **warmer months**.  
+- Members ride mostly on **weekdays during commute hours**.  
+- Member behavior is more **regular and predictable**.
+
+**Segments:**  
+- **Members = commuters**  
+- **Casual = leisure/occasional riders**
+
+# ACT: Recommendations  
+
+### 1. Seasonal Membership Promotions  
+- Target casual riders during **spring/summer**.  
+- Offer **discounts** or **trial weeks** for frequent weekend riders.
+
+### 2. Commuter-Focused Campaigns  
+- Emphasize **time/money savings**.  
+- Partner with employers for **corporate discounts**.
+
+### 3. Digital Behavioral Targeting  
+- Show in-app prompts after long rides.  
+- Use weekend social media ads toward leisure riders.
+
+# Conclusion  
+
+Cyclistic can grow revenue by **converting casual riders into annual members**.  
+Behavior-based marketing—using ride length, timing, and seasonality—allows targeted campaigns that match actual rider behavior.
